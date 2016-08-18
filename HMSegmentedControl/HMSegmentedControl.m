@@ -22,6 +22,9 @@
 @property (nonatomic, readwrite) NSArray *segmentWidthsArray;
 @property (nonatomic, strong) HMScrollView *scrollView;
 
+// Accessibility
+@property (nonatomic, strong) NSArray *accessibilityElements;
+
 @end
 
 @implementation HMScrollView
@@ -275,6 +278,8 @@
     self.scrollView.layer.sublayers = nil;
     
     CGRect oldRect = rect;
+
+    NSMutableArray *accessibilityElements = [[NSMutableArray alloc] init];
     
     if (self.type == HMSegmentedControlTypeText) {
         [self.sectionTitles enumerateObjectsUsingBlock:^(id titleString, NSUInteger idx, BOOL *stop) {
@@ -292,25 +297,30 @@
 
             CGFloat y = roundf((CGRectGetHeight(self.frame) - selectionStyleNotBox * self.selectionIndicatorHeight) / 2 - stringHeight / 2 + self.selectionIndicatorHeight * locationUp);
             CGRect rect;
-            if (self.segmentWidthStyle == HMSegmentedControlSegmentWidthStyleFixed) {
-                rect = CGRectMake((self.segmentWidth * idx) + (self.segmentWidth - stringWidth) / 2, y, stringWidth, stringHeight);
-                rectDiv = CGRectMake((self.segmentWidth * idx) - (self.verticalDividerWidth / 2), self.selectionIndicatorHeight * 2, self.verticalDividerWidth, self.frame.size.height - (self.selectionIndicatorHeight * 4));
-                fullRect = CGRectMake(self.segmentWidth * idx, 0, self.segmentWidth, oldRect.size.height);
-            } else if (self.segmentWidthStyle == HMSegmentedControlSegmentWidthStyleDynamic) {
-                // When we are drawing dynamic widths, we need to loop the widths array to calculate the xOffset
-                CGFloat xOffset = 0;
-                NSInteger i = 0;
-                for (NSNumber *width in self.segmentWidthsArray) {
-                    if (idx == i)
-                        break;
-                    xOffset = xOffset + [width floatValue];
-                    i++;
+            switch (self.segmentWidthStyle) {
+                case HMSegmentedControlSegmentWidthStyleFixed: {
+                    rect = CGRectMake((self.segmentWidth * idx) + (self.segmentWidth - stringWidth) / 2, y, stringWidth, stringHeight);
+                    rectDiv = CGRectMake((self.segmentWidth * idx) - (self.verticalDividerWidth / 2), self.selectionIndicatorHeight * 2, self.verticalDividerWidth, self.frame.size.height - (self.selectionIndicatorHeight * 4));
+                    fullRect = CGRectMake(self.segmentWidth * idx, 0, self.segmentWidth, oldRect.size.height);
+                    break;
                 }
-                
-                CGFloat widthForIndex = [[self.segmentWidthsArray objectAtIndex:idx] floatValue];
-                rect = CGRectMake(xOffset, y, widthForIndex, stringHeight);
-                fullRect = CGRectMake(self.segmentWidth * idx, 0, widthForIndex, oldRect.size.height);
-                rectDiv = CGRectMake(xOffset - (self.verticalDividerWidth / 2), self.selectionIndicatorHeight * 2, self.verticalDividerWidth, self.frame.size.height - (self.selectionIndicatorHeight * 4));
+                case HMSegmentedControlSegmentWidthStyleDynamic: {
+                    // When we are drawing dynamic widths, we need to loop the widths array to calculate the xOffset
+                    CGFloat xOffset = 0;
+                    NSInteger i = 0;
+                    for (NSNumber *width in self.segmentWidthsArray) {
+                        if (idx == i)
+                            break;
+                        xOffset = xOffset + [width floatValue];
+                        i++;
+                    }
+
+                    CGFloat widthForIndex = [[self.segmentWidthsArray objectAtIndex:idx] floatValue];
+                    rect = CGRectMake(xOffset, y, widthForIndex, stringHeight);
+                    fullRect = CGRectMake(self.segmentWidth * idx, 0, widthForIndex, oldRect.size.height);
+                    rectDiv = CGRectMake(xOffset - (self.verticalDividerWidth / 2), self.selectionIndicatorHeight * 2, self.verticalDividerWidth, self.frame.size.height - (self.selectionIndicatorHeight * 4));
+                    break;
+                }
             }
             
             // Fix rect position/size to avoid blurry labels
@@ -324,7 +334,13 @@
             }
             titleLayer.string = [self attributedTitleAtIndex:idx];
             titleLayer.contentsScale = [[UIScreen mainScreen] scale];
-            
+
+            // Accessibility element for text
+            UIAccessibilityElement *titleElement = [[UIAccessibilityElement alloc] initWithAccessibilityContainer:self];
+            titleElement.accessibilityLabel = titleLayer.string;
+            titleElement.accessibilityFrame = [self convertRect:rect toView:nil];
+            [accessibilityElements addObject:titleElement];
+
             [self.scrollView.layer addSublayer:titleLayer];
             
             // Vertical Divider
@@ -360,7 +376,13 @@
             } else {
                 imageLayer.contents = (id)icon.CGImage;
             }
-            
+
+            // Accessibility element for text
+            UIAccessibilityElement *imageElement = [[UIAccessibilityElement alloc] initWithAccessibilityContainer:self];
+            imageElement.accessibilityLabel = @(idx).stringValue;
+            imageElement.accessibilityFrame = [self convertRect:rect toView:nil];
+            [accessibilityElements addObject:imageElement];
+
             [self.scrollView.layer addSublayer:imageLayer];
             // Vertical Divider
             if (self.isVerticalDividerEnabled && idx>0) {
@@ -440,11 +462,20 @@
             [self.scrollView.layer addSublayer:imageLayer];
 			titleLayer.contentsScale = [[UIScreen mainScreen] scale];
             [self.scrollView.layer addSublayer:titleLayer];
-			
+
+            // Accessibility element for text
+            UIAccessibilityElement *titleElement = [[UIAccessibilityElement alloc] initWithAccessibilityContainer:self];
+            titleElement.accessibilityLabel = titleLayer.string;
+            titleElement.accessibilityFrame = [self convertRect:textRect toView:nil];
+            [accessibilityElements addObject:titleElement];
+
+
             [self addBackgroundAndBorderLayerWithRect:imageRect];
         }];
 	}
-    
+
+    self.accessibilityElements = [NSArray arrayWithArray:accessibilityElements];
+
     // Add the selection indicators
     if (self.selectedSegmentIndex != HMSegmentedControlNoSegment) {
         if (self.selectionStyle == HMSegmentedControlSelectionStyleArrow) {
@@ -746,31 +777,34 @@
 - (void)scrollToSelectedSegmentIndex:(BOOL)animated {
     CGRect rectForSelectedIndex;
     CGFloat selectedSegmentOffset = 0;
-    if (self.segmentWidthStyle == HMSegmentedControlSegmentWidthStyleFixed) {
-        rectForSelectedIndex = CGRectMake(self.segmentWidth * self.selectedSegmentIndex,
-                                          0,
-                                          self.segmentWidth,
-                                          self.frame.size.height);
-        
-        selectedSegmentOffset = (CGRectGetWidth(self.frame) / 2) - (self.segmentWidth / 2);
-    } else if (self.segmentWidthStyle == HMSegmentedControlSegmentWidthStyleDynamic) {
-        NSInteger i = 0;
-        CGFloat offsetter = 0;
-        for (NSNumber *width in self.segmentWidthsArray) {
-            if (self.selectedSegmentIndex == i)
-                break;
-            offsetter = offsetter + [width floatValue];
-            i++;
+    switch (self.segmentWidthStyle) {
+        case HMSegmentedControlSegmentWidthStyleFixed:
+            rectForSelectedIndex = CGRectMake(self.segmentWidth * self.selectedSegmentIndex,
+                                              0,
+                                              self.segmentWidth,
+                                              self.frame.size.height);
+
+            selectedSegmentOffset = (CGRectGetWidth(self.frame) / 2) - (self.segmentWidth / 2);
+            break;
+        case HMSegmentedControlSegmentWidthStyleDynamic: {
+            NSInteger i = 0;
+            CGFloat offsetter = 0;
+            for (NSNumber *width in self.segmentWidthsArray) {
+                if (self.selectedSegmentIndex == i)
+                    break;
+                offsetter = offsetter + [width floatValue];
+                i++;
+            }
+
+            rectForSelectedIndex = CGRectMake(offsetter,
+                                              0,
+                                              [[self.segmentWidthsArray objectAtIndex:self.selectedSegmentIndex] floatValue],
+                                              self.frame.size.height);
+
+            selectedSegmentOffset = (CGRectGetWidth(self.frame) / 2) - ([[self.segmentWidthsArray objectAtIndex:self.selectedSegmentIndex] floatValue] / 2);
+            break;
         }
-        
-        rectForSelectedIndex = CGRectMake(offsetter,
-                                          0,
-                                          [[self.segmentWidthsArray objectAtIndex:self.selectedSegmentIndex] floatValue],
-                                          self.frame.size.height);
-        
-        selectedSegmentOffset = (CGRectGetWidth(self.frame) / 2) - ([[self.segmentWidthsArray objectAtIndex:self.selectedSegmentIndex] floatValue] / 2);
     }
-    
     
     CGRect rectToScrollTo = rectForSelectedIndex;
     rectToScrollTo.origin.x -= selectedSegmentOffset;
@@ -890,6 +924,28 @@
     }
     
     return [resultingAttrs copy];
+}
+
+#pragma mark - Accessibility Container protocol
+
+- (BOOL)isAccessibilityElement
+{
+    return NO;
+}
+
+- (NSInteger)accessibilityElementCount
+{
+    return [self.accessibilityElements count];
+}
+
+- (id)accessibilityElementAtIndex:(NSInteger)index
+{
+    return self.accessibilityElements[index];
+}
+
+- (NSInteger)indexOfAccessibilityElement:(id)element
+{
+    return [self.accessibilityElements indexOfObject:element];
 }
 
 @end
